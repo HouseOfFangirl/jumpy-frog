@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Jumpy Frog 🐸</title>
+    <style>
+        html, body { margin:0; padding:0; height:100%; overflow:hidden; background:linear-gradient(135deg, #4A90E2, #7FDA89); }
+        #container { position:relative; width:100%; height:100%; display:flex; justify-content:center; align-items:center; }
+        canvas { border:6px solid #2C5F2D; border-radius:16px; box-shadow:0 15px 40px rgba(0,0,0,0.4); max-width:100%; max-height:100%; display:block; cursor:pointer; }
+        #overlay { position:absolute; top:10px; left:50%; transform:translateX(-50%); color:#2C5F2D; font-weight:bold; font-size:clamp(20px,5vw,26px); text-shadow:2px 2px 4px #fff; z-index:10; white-space:nowrap; }
+        #startScreen, #gameOver, #leaderboardScreen { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(255,255,255,0.95); padding:clamp(20px,5vw,30px); border-radius:20px; text-align:center; display:none; box-shadow:0 10px 30px rgba(0,0,0,0.5); z-index:20; width:80%; max-width:360px; }
+        button { font-size:clamp(18px,4vw,22px); padding:12px 30px; background:#2C5F2D; color:white; border:none; border-radius:12px; cursor:pointer; margin:10px; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="overlay">Score: <span id="score">0</span> | High: <span id="high">0</span></div>
+        <canvas id="canvas" width="400" height="600"></canvas>
+
+        <div id="startScreen">
+            <h1 style="font-size:clamp(40px,8vw,48px); margin:0; color:#2C5F2D;">🐸 JUMPY FROG 🐸</h1>
+            <p style="font-size:clamp(18px,4vw,20px); margin:10px 0 20px; color:#555;">90s swamp vibes</p>
+            <button onclick="unlockSound()" style="background:#90EE90; color:#2C5F2D;">🔊 UNLOCK SOUND</button>
+            <button onclick="startGame()">TAP TO START</button>
+            <button onclick="showLeaderboardFromStart()" style="background:#90EE90; color:#2C5F2D;">🏆 Leaderboard</button>
+        </div>
+
+        <div id="gameOver">
+            <h2 style="color:#C00; margin:0 0 10px;">GAME OVER!</h2>
+            <p id="final" style="font-size:clamp(24px,5vw,28px); margin:10px 0;"></p>
+            <button onclick="restartGame()">Play Again 🐸</button>
+            <button onclick="showLeaderboard()" style="background:#90EE90; color:#2C5F2D;">🏆 Leaderboard</button>
+        </div>
+
+        <div id="leaderboardScreen">
+            <h2>🏆 TOP 10</h2>
+            <div id="lbList" style="text-align:left; font-size:clamp(16px,3.5vw,18px); margin:15px 0; max-height:180px; overflow:auto;"></div>
+            <button onclick="hideLB()">Back to Game</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const highEl = document.getElementById('high');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameOver');
+        const finalEl = document.getElementById('final');
+        const lbScreen = document.getElementById('leaderboardScreen');
+        const lbList = document.getElementById('lbList');
+
+        let audioCtx = null;
+
+        function unlockSound() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            audioCtx.resume();
+            playSound(440, 50, 'triangle', 0.001);
+        }
+
+        function playSound(freq, duration, type='sine', vol=0.3) {
+            if (!audioCtx || audioCtx.state !== 'running') return;
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type; osc.frequency.value = freq;
+                gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration/1000);
+                osc.connect(gain).connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + duration/1000);
+            } catch(e) {}
+        }
+
+        let gameRunning = false;
+        let score = 0;
+        let highScore = parseInt(localStorage.getItem('jumpyHigh') || '0');
+        highEl.textContent = highScore;
+        let leaderboard = JSON.parse(localStorage.getItem('jumpyLB') || '[]');
+
+        const frog = {x:80, y:300, w:42, h:38, vy:0, g:0.52, jump:-11.8, rot:0};
+        let crocs = [];
+        let scrollX = 0;
+
+        function createCroc() { crocs.push({x:canvas.width + 50, top:90 + Math.random()*210, gap:185}); }
+
+        function jump() {
+            if (!gameRunning) gameRunning = true;
+            frog.vy = frog.jump;
+            playSound(440,90,'triangle',0.45);
+            playSound(720,70,'sawtooth',0.25);
+        }
+
+        canvas.addEventListener('click', jump);
+        canvas.addEventListener('touchstart', e => { e.preventDefault(); jump(); });
+        document.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); jump(); } });
+
+        function startGame() {
+            startScreen.style.display = 'none';
+            gameRunning = true;
+            score = 0;
+            frog.y = 300; frog.vy = 0; frog.rot = 0;
+            crocs = []; scrollX = 0;
+            createCroc();
+            scoreEl.textContent = '0';
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            playSound(320,350,'sawtooth',0.55);
+            setTimeout(() => playSound(180,480,'sawtooth',0.45), 180);
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('jumpyHigh', highScore);
+                highEl.textContent = highScore;
+            }
+            finalEl.textContent = `Score: ${score}`;
+            gameOverScreen.style.display = 'block';
+        }
+
+        function restartGame() {
+            gameOverScreen.style.display = 'none';
+            startScreen.style.display = 'block';
+        }
+
+        function showLeaderboard() {
+            gameOverScreen.style.display = 'none';
+            lbList.innerHTML = '';
+            leaderboard.slice(0,10).forEach((entry,i) => {
+                lbList.innerHTML += `${i+1}. ${entry.name} — ${entry.score}<br>`;
+            });
+            lbScreen.style.display = 'block';
+        }
+
+        function showLeaderboardFromStart() {
+            startScreen.style.display = 'none';
+            lbList.innerHTML = '';
+            leaderboard.slice(0,10).forEach((entry,i) => {
+                lbList.innerHTML += `${i+1}. ${entry.name} — ${entry.score}<br>`;
+            });
+            lbScreen.style.display = 'block';
+        }
+
+        function hideLB() {
+            lbScreen.style.display = 'none';
+            startScreen.style.display = 'block';
+        }
+
+        function update() {
+            if (!gameRunning) return;
+            frog.vy += frog.g;
+            frog.y += frog.vy;
+            frog.rot = Math.max(frog.vy * 0.09, -0.45);
+
+            scrollX -= 2.5;
+            if (scrollX < -70) scrollX = 0;
+
+            if (crocs.length === 0 || crocs[crocs.length-1].x < 200) createCroc();
+
+            for (let i=crocs.length-1; i>=0; i--) {
+                crocs[i].x -= 3.3;
+                if (crocs[i].x < -80) {
+                    crocs.splice(i,1);
+                    score++;
+                    scoreEl.textContent = score;
+                    playSound(820,50); playSound(1100,40);
+                }
+            }
+
+            if (frog.y + frog.h > canvas.height || frog.y < -30) gameOver();
+            for (let c of crocs) {
+                if (frog.x + frog.w > c.x && frog.x < c.x + 65 &&
+                    (frog.y < c.top || frog.y + frog.h > c.top + c.gap)) gameOver();
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0,0,canvas.width,canvas.height);
+
+            const grad = ctx.createLinearGradient(0,100,0,canvas.height);
+            grad.addColorStop(0,'#87CEEB');
+            grad.addColorStop(0.5,'#20B2AA');
+            grad.addColorStop(1,'#008B8B');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0,0,canvas.width,canvas.height);
+
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(0,canvas.height-35,canvas.width,35);
+
+            ctx.fillStyle = '#004D00';
+            for (let i=0; i<14; i++) {
+                const x = (i*58 + scrollX) % 520 - 60;
+                ctx.fillRect(x+4, canvas.height - 220, 14, 200);
+                ctx.fillStyle = '#228B22';
+                ctx.fillRect(x-8, canvas.height - 260, 38, 60);
+                ctx.fillStyle = '#004D00';
+            }
+
+            crocs.forEach(c => {
+                ctx.fillStyle = '#5D4037';
+                ctx.fillRect(c.x, 0, 65, c.top);
+                ctx.fillRect(c.x, c.top + c.gap, 65, canvas.height);
+                ctx.fillStyle = '#8B5A2B';
+                ctx.fillRect(c.x + 5, 10, 55, c.top - 20);
+                ctx.fillRect(c.x + 5, c.top + c.gap + 10, 55, canvas.height - c.top - c.gap - 20);
+                ctx.fillStyle = '#FF4444';
+                ctx.fillRect(c.x + 12, 25, 18, 18);
+                ctx.fillRect(c.x + 37, 25, 18, 18);
+                ctx.fillStyle = '#FFF';
+                ctx.fillRect(c.x + 16, 28, 8, 8);
+                ctx.fillRect(c.x + 41, 28, 8, 8);
+                ctx.fillStyle = '#FF4444';
+                ctx.fillRect(c.x + 12, c.top + c.gap - 40, 18, 18);
+                ctx.fillRect(c.x + 37, c.top + c.gap - 40, 18, 18);
+                ctx.fillStyle = '#FFF';
+                ctx.fillRect(c.x + 16, c.top + c.gap - 37, 8, 8);
+                ctx.fillRect(c.x + 41, c.top + c.gap - 37, 8, 8);
+            });
+
+            ctx.save();
+            ctx.translate(frog.x + 21, frog.y + 19);
+            ctx.rotate(frog.rot);
+            ctx.fillStyle = '#32CD32';
+            ctx.beginPath(); ctx.ellipse(0,4,22,18,0,0,Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#90EE90';
+            ctx.fillRect(-15,8,30,12);
+            ctx.fillStyle = '#FFF';
+            ctx.beginPath(); ctx.arc(-11,-8,10,0,Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(11,-8,10,0,Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#111';
+            ctx.beginPath(); ctx.arc(-8,-6,5,0,Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(14,-6,5,0,Math.PI*2); ctx.fill();
+            ctx.restore();
+
+            if (!gameRunning) {
+                ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                ctx.fillRect(0,0,canvas.width,canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 32px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('TAP TO START', canvas.width/2, canvas.height/2);
+            }
+        }
+
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        createCroc();
+        loop();
+        startScreen.style.display = 'block';
+    </script>
+</body>
+</html>
